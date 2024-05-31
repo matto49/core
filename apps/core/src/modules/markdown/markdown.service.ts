@@ -44,8 +44,14 @@ export class MarkdownService {
     private readonly macroService: TextMacroService,
   ) {}
 
-  async insertPostsToDb(data: DatatypeDto[]) {
+  async postsDtoToModels(data: DatatypeDto[]) {
     let count = 1
+
+    const defaultCategory = await this.categoryModel.findOne()
+    if (!defaultCategory) {
+      throw new InternalServerErrorException('分类不存在')
+    }
+
     const categoryNameAndId = (await this.categoryModel.find().lean()).map(
       (c) => {
         return { name: c.name, _id: c._id, slug: c.slug }
@@ -79,13 +85,9 @@ export class MarkdownService {
         return hasCategory
       }
     }
+    const models: PostModel[] = []
     const genDate = this.genDate
-    const models = [] as PostModel[]
-    const defaultCategory = await this.categoryModel.findOne()
-    if (!defaultCategory) {
-      throw new InternalServerErrorException('分类不存在')
-    }
-    for await (const item of data) {
+    for (const item of data) {
       if (!item.meta) {
         models.push({
           title: `未命名-${count++}`,
@@ -107,11 +109,38 @@ export class MarkdownService {
         } as PostModel)
       }
     }
+    return models
+  }
+
+  async insertPostsToDb(data: DatatypeDto[]) {
+    let models = await this.postsDtoToModels(data)
+
+    // 去重
+    models = models.reduce((pre, cur) => {
+      if (pre.some((item) => item.slug === cur.slug)) {
+        return pre
+      } else {
+        return pre.concat(cur)
+      }
+    }, [] as PostModel[])
+
     return await this.postModel
       .insertMany(models, { ordered: false })
-      .catch(() => {
-        Logger.log('一篇文章导入失败', MarkdownService.name)
+      .catch(async (error) => {
+        Logger.log(error)
+        const existedModel = await this.postModel.find({
+          slug: { $in: models.map((item) => item.slug) },
+        })
+        return {
+          message: 'article existed',
+          data: existedModel.map((item) => item.slug),
+        }
       })
+  }
+
+  async updatePostsToDb(data: DatatypeDto[]) {
+    const models = await this.postsDtoToModels(data)
+    models.map((post) => this.postModel.updateOne({ slug: post.slug }, post))
   }
 
   async insertNotesToDb(data: DatatypeDto[]) {

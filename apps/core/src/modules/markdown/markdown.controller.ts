@@ -36,6 +36,21 @@ export class MarkdownController {
     }
   }
 
+  @Post('/update')
+  @Auth()
+  async updateArticles(@Body() body: DataListDto) {
+    const type = body.type
+
+    switch (type) {
+      case ArticleTypeEnum.Post: {
+        return await this.service.updatePostsToDb(body.data)
+      }
+      case ArticleTypeEnum.Note: {
+        return await this.service.insertNotesToDb(body.data)
+      }
+    }
+  }
+
   @Get('/export')
   @Auth()
   @HTTPDecorators.Bypass
